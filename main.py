@@ -1,142 +1,120 @@
 import tkinter as tk
 from tkinter import messagebox, ttk
+import random
 import json
 import os
 
-# Путь к файлу базы данных
-DATA_FILE = "books_data.json"
+# Имя файла для хранения истории
+HISTORY_FILE = "task_history.json"
 
-class BookTracker:
+class RandomTaskGenerator:
     def __init__(self, root):
         self.root = root
-        self.root.title("Book Tracker - Твой список книг")
-        self.root.geometry("750x600")
+        self.root.title("Random Task Generator")
+        self.root.geometry("500x600")
 
-        # Основной список книг
-        self.books = self.load_data()
+        # 1. Список предопределённых задач
+        self.predefined_tasks = [
+            {"text": "Прочитать главу учебника", "type": "Учёба"},
+            {"text": "Сделать 20 приседаний", "type": "Спорт"},
+            {"text": "Разобрать почту", "type": "Работа"},
+            {"text": "Выучить 10 новых слов", "type": "Учёба"},
+            {"text": "Пробежка 15 минут", "type": "Спорт"},
+            {"text": "Составить план на неделю", "type": "Работа"}
+        ]
 
-        # --- ПОЛЯ ВВОДА ---
-        input_frame = tk.LabelFrame(root, text="Добавить новую книгу", padx=10, pady=10)
-        input_frame.pack(fill="x", padx=20, pady=10)
+        # Загрузка истории из JSON
+        self.history = self.load_history()
 
-        tk.Label(input_frame, text="Название:").grid(row=0, column=0, sticky="w")
-        self.title_entry = tk.Entry(input_frame, width=30)
-        self.title_entry.grid(row=0, column=1, padx=5, pady=2)
-
-        tk.Label(input_frame, text="Автор:").grid(row=0, column=2, sticky="w")
-        self.author_entry = tk.Entry(input_frame, width=30)
-        self.author_entry.grid(row=0, column=3, padx=5, pady=2)
-
-        tk.Label(input_frame, text="Жанр:").grid(row=1, column=0, sticky="w")
-        self.genre_entry = tk.Entry(input_frame, width=30)
-        self.genre_entry.grid(row=1, column=1, padx=5, pady=2)
-
-        tk.Label(input_frame, text="Страниц:").grid(row=1, column=2, sticky="w")
-        self.pages_entry = tk.Entry(input_frame, width=30)
-        self.pages_entry.grid(row=1, column=3, padx=5, pady=2)
-
-        self.add_button = tk.Button(input_frame, text="Добавить книгу", command=self.add_book, bg="#4CAF50", fg="white")
-        self.add_button.grid(row=2, column=0, columnspan=4, pady=10, sticky="we")
-
-        # --- ФИЛЬТРАЦИЯ ---
-        filter_frame = tk.LabelFrame(root, text="Фильтрация", padx=10, pady=10)
-        filter_frame.pack(fill="x", padx=20, pady=10)
-
-        tk.Label(filter_frame, text="По жанру:").grid(row=0, column=0)
-        self.filter_genre = tk.Entry(filter_frame, width=20)
-        self.filter_genre.grid(row=0, column=1, padx=5)
-
-        tk.Label(filter_frame, text="Мин. страниц:").grid(row=0, column=2)
-        self.filter_pages = tk.Entry(filter_frame, width=10)
-        self.filter_pages.grid(row=0, column=3, padx=5)
-
-        tk.Button(filter_frame, text="Применить фильтр", command=self.apply_filter).grid(row=0, column=4, padx=5)
-        tk.Button(filter_frame, text="Сбросить", command=self.reset_filter).grid(row=0, column=5, padx=5)
-
-        # --- ТАБЛИЦА ВЫВОДА ---
-        columns = ("title", "author", "genre", "pages")
-        self.tree = ttk.Treeview(root, columns=columns, show="headings")
+        # --- Интерфейс ---
         
-        self.tree.heading("title", text="Название")
-        self.tree.heading("author", text="Автор")
-        self.tree.heading("genre", text="Жанр")
-        self.tree.heading("pages", text="Страниц")
+        # Кнопка генерации
+        self.gen_btn = tk.Button(root, text="Сгенерировать задачу", font=("Arial", 12, "bold"),
+                                 command=self.generate_task, bg="#4CAF50", fg="white")
+        self.gen_btn.pack(pady=20)
+
+        # Поле для отображения текущей задачи
+        self.current_task_label = tk.Label(root, text="Нажмите кнопку для выбора задачи", 
+                                           font=("Arial", 10, "italic"), wraplength=400)
+        self.current_task_label.pack(pady=10)
+
+        # --- Секция добавления своей задачи ---
+        add_frame = tk.LabelFrame(root, text="Добавить свою задачу в список доступных")
+        add_frame.pack(fill="x", padx=20, pady=10)
+
+        self.new_task_entry = tk.Entry(add_frame)
+        self.new_task_entry.grid(row=0, column=0, padx=5, pady=5, sticky="we")
+
+        self.type_var = tk.StringVar(value="Учёба")
+        self.type_menu = ttk.Combobox(add_frame, textvariable=self.type_var, 
+                                      values=["Учёба", "Спорт", "Работа"], width=10)
+        self.type_menu.grid(row=0, column=1, padx=5)
+
+        tk.Button(add_frame, text="+", command=self.add_custom_task).grid(row=0, column=2, padx=5)
+        add_frame.columnconfigure(0, weight=1)
+
+        # --- Секция истории и фильтрации ---
+        tk.Label(root, text="История сгенерированных задач:", font=("Arial", 10, "bold")).pack()
         
-        self.tree.column("pages", width=80, anchor="center")
-        self.tree.pack(fill="both", expand=True, padx=20, pady=10)
+        filter_frame = tk.Frame(root)
+        filter_frame.pack(pady=5)
+        
+        tk.Label(filter_frame, text="Фильтр:").grid(row=0, column=0)
+        self.filter_var = tk.StringVar(value="Все")
+        self.filter_menu = ttk.Combobox(filter_frame, textvariable=self.filter_var, 
+                                        values=["Все", "Учёба", "Спорт", "Работа"], width=10)
+        self.filter_menu.grid(row=0, column=1, padx=5)
+        self.filter_menu.bind("«ComboboxSelected»", lambda e: self.update_history_display())
 
-        self.refresh_table(self.books)
+        self.history_listbox = tk.Listbox(root, width=60, height=12)
+        self.history_listbox.pack(padx=20, pady=5)
 
-    def load_data(self):
-        if os.path.exists(DATA_FILE):
+        self.update_history_display()
+
+    def load_history(self):
+        if os.path.exists(HISTORY_FILE):
             try:
-                with open(DATA_FILE, "r", encoding="utf-8") as f:
+                with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                     return json.load(f)
             except:
                 return []
         return []
 
-    def save_data(self):
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(self.books, f, ensure_ascii=False, indent=4)
+    def save_history(self):
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(self.history, f, ensure_ascii=False, indent=4)
 
-    def add_book(self):
-        title = self.title_entry.get().strip()
-        author = self.author_entry.get().strip()
-        genre = self.genre_entry.get().strip()
-        pages = self.pages_entry.get().strip()
-
-        # Проверка на пустые поля
-        if not (title and author and genre and pages):
-            messagebox.showwarning("Ошибка", "Все поля должны быть заполнены!")
-            return
-
-        # Проверка на число в поле страниц
-        if not pages.isdigit():
-            messagebox.showwarning("Ошибка", "Количество страниц должно быть числом!")
-            return
-
-        new_book = {
-            "title": title,
-            "author": author,
-            "genre": genre,
-            "pages": int(pages)
-        }
-
-        self.books.append(new_book)
-        self.save_data()
-        self.refresh_table(self.books)
+    def generate_task(self):
+        # 2. Выбор случайной задачи
+        task = random.choice(self.predefined_tasks)
+        self.current_task_label.config(text=f"ЗАДАЧА: {task['text']} ({task['type']})", font=("Arial", 10, "bold"))
         
-        # Очистка полей
-        for entry in (self.title_entry, self.author_entry, self.genre_entry, self.pages_entry):
-            entry.delete(0, tk.END)
+        # 3. Добавление в историю
+        self.history.insert(0, task)
+        self.save_history()
+        self.update_history_display()
 
-    def refresh_table(self, data_list):
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        for book in data_list:
-            self.tree.insert("", "end", values=(book["title"], book["author"], book["genre"], book["pages"]))
-
-    def apply_filter(self):
-        genre_q = self.filter_genre.get().strip().lower()
-        pages_q = self.filter_pages.get().strip()
-
-        filtered = self.books
-
-        if genre_q:
-            filtered = [b for b in filtered if genre_q in b["genre"].lower()]
+    def add_custom_task(self):
+        # 6. Проверка корректности ввода
+        text = self.new_task_entry.get().strip()
+        if not text:
+            messagebox.showwarning("Ошибка", "Текст задачи не может быть пустым!")
+            return
         
-        if pages_q.isdigit():
-            filtered = [b for b in filtered if b["pages"] >= int(pages_q)]
+        self.predefined_tasks.append({"text": text, "type": self.type_var.get()})
+        self.new_task_entry.delete(0, tk.END)
+        messagebox.showinfo("Успех", "Задача добавлена в список возможных!")
 
-        self.refresh_table(filtered)
-
-    def reset_filter(self):
-        self.filter_genre.delete(0, tk.END)
-        self.filter_pages.delete(0, tk.END)
-        self.refresh_table(self.books)
+    def update_history_display(self):
+        # 4. Реализация фильтрации
+        self.history_listbox.delete(0, tk.END)
+        f_type = self.filter_var.get()
+        
+        for task in self.history:
+            if f_type == "Все" or task['type'] == f_type:
+                self.history_listbox.insert(tk.END, f"[{task['type']}] {task['text']}")
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = BookTracker(root)
+    app = RandomTaskGenerator(root)
     root.mainloop()
